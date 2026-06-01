@@ -193,6 +193,74 @@
       overflow: hidden;
     }
 
+    .updates {
+      margin-bottom: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .updates-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .updates-head strong {
+      font-size: 14px;
+    }
+
+    .updates-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .update-item {
+      display: grid;
+      grid-template-columns: minmax(120px, 180px) 1fr auto;
+      gap: 14px;
+      align-items: center;
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      padding: 13px 16px;
+      text-align: left;
+    }
+
+    .update-item:last-child {
+      border-bottom: 0;
+    }
+
+    .update-item:hover {
+      background: #fafbfc;
+    }
+
+    .update-item strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .update-item p {
+      margin: 0;
+      color: #344054;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .update-item time {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
     .board-head {
       display: flex;
       align-items: center;
@@ -744,6 +812,16 @@
         </div>
       </section>
 
+      <section class="updates" aria-label="New comments">
+        <div class="updates-head">
+          <strong>New Comments</strong>
+          <span class="pill" id="newCommentCount">0 updates</span>
+        </div>
+        <div id="recentCommentsList" class="updates-list">
+          <div class="empty">No comments yet.</div>
+        </div>
+      </section>
+
       <section class="board">
         <div class="board-head">
           <strong>Product Tracker</strong>
@@ -971,6 +1049,8 @@
     const applySortButton = document.querySelector("#applySortButton");
     const channelViewList = document.querySelector("#channelViewList");
     const showAllChannelsButton = document.querySelector("#showAllChannelsButton");
+    const recentCommentsList = document.querySelector("#recentCommentsList");
+    const newCommentCount = document.querySelector("#newCommentCount");
     const modalTitle = document.querySelector("#modalTitle");
     const noteText = document.querySelector("#noteText");
     const noteAuthor = document.querySelector("#noteAuthor");
@@ -1268,6 +1348,44 @@
         const latestDoneIndex = skuNotes.findIndex((note) => note.type === "done");
         return count + (latestRequestIndex !== -1 && (latestDoneIndex === -1 || latestRequestIndex < latestDoneIndex) ? 1 : 0);
       }, 0);
+    }
+
+    function getRecentComments() {
+      const notes = loadNotes();
+      return Object.entries(notes)
+        .flatMap(([sku, skuNotes]) => {
+          const product = state.products.find((item) => item.sku === sku);
+          return (skuNotes || []).map((note) => ({
+            ...note,
+            sku,
+            productName: product?.name || "Unknown product"
+          }));
+        })
+        .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+    }
+
+    function renderRecentComments() {
+      const comments = getRecentComments();
+      newCommentCount.textContent = `${comments.length} ${comments.length === 1 ? "update" : "updates"}`;
+
+      if (!comments.length) {
+        recentCommentsList.innerHTML = '<div class="empty">No comments yet.</div>';
+        return;
+      }
+
+      recentCommentsList.innerHTML = comments.slice(0, 8).map((comment) => {
+        const label = comment.type === "done" ? "Resolved" : comment.type === "request" ? "Request" : "Note";
+        return `
+          <button class="update-item" type="button" data-comment-sku="${escapeHTML(comment.sku)}">
+            <span>
+              <strong>${escapeHTML(comment.sku)} - ${escapeHTML(comment.productName)}</strong>
+              <span class="sub">${label} by ${escapeHTML(comment.author || "No author")}</span>
+            </span>
+            <p>${escapeHTML(comment.text)}</p>
+            <time>${new Date(comment.createdAt).toLocaleString("en-US")}</time>
+          </button>
+        `;
+      }).join("");
     }
 
     function showDialog(dialog) {
@@ -1628,6 +1746,7 @@
       noteText.value = "";
       renderHistory();
       renderRows();
+      renderRecentComments();
     }
 
     function clearNotes() {
@@ -1638,6 +1757,7 @@
       saveNotes(notes);
       renderHistory();
       renderRows();
+      renderRecentComments();
     }
 
     function renderAll() {
@@ -1645,6 +1765,7 @@
       renderStatusFilter();
       renderTableHead();
       renderChannelList();
+      renderRecentComments();
       renderRows();
     }
 
@@ -1654,6 +1775,9 @@
 
       const noteButton = event.target.closest("[data-note-sku]");
       if (noteButton) openNotes(noteButton.dataset.noteSku);
+
+      const commentButton = event.target.closest("[data-comment-sku]");
+      if (commentButton) openNotes(commentButton.dataset.commentSku);
 
       const editButton = event.target.closest("[data-edit-sku]");
       if (editButton) openProductForm(editButton.dataset.editSku);
