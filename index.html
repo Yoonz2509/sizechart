@@ -215,6 +215,28 @@
       font-size: 14px;
     }
 
+    .updates-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mini-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: #1f2937;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
     .updates-list {
       display: grid;
       gap: 0;
@@ -331,6 +353,46 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0;
+    }
+
+    .th-content {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .sort-pair {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 2px;
+      opacity: 0.55;
+    }
+
+    th:hover .sort-pair,
+    .sort-pair.active {
+      opacity: 1;
+    }
+
+    .sort-mini {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 15px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: #667085;
+      cursor: pointer;
+      font-size: 9px;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .sort-mini.active {
+      border-color: #1f2937;
+      color: #1f2937;
     }
 
     tbody tr:hover {
@@ -815,7 +877,10 @@
       <section class="updates" aria-label="New comments">
         <div class="updates-head">
           <strong>New Comments</strong>
-          <span class="pill" id="newCommentCount">0 updates</span>
+          <div class="updates-actions">
+            <span class="pill" id="newCommentCount">0 updates</span>
+            <button id="toggleCommentsButton" class="mini-icon" type="button" title="Show all comments" aria-label="Show all comments">▼</button>
+          </div>
         </div>
         <div id="recentCommentsList" class="updates-list">
           <div class="empty">No comments yet.</div>
@@ -1051,6 +1116,7 @@
     const showAllChannelsButton = document.querySelector("#showAllChannelsButton");
     const recentCommentsList = document.querySelector("#recentCommentsList");
     const newCommentCount = document.querySelector("#newCommentCount");
+    const toggleCommentsButton = document.querySelector("#toggleCommentsButton");
     const modalTitle = document.querySelector("#modalTitle");
     const noteText = document.querySelector("#noteText");
     const noteAuthor = document.querySelector("#noteAuthor");
@@ -1070,6 +1136,7 @@
     let redoStack = [];
     let isRestoringHistory = false;
     let visibleChannelIds = [];
+    let showAllComments = false;
 
     function clone(value) {
       return JSON.parse(JSON.stringify(value));
@@ -1370,10 +1437,18 @@
 
       if (!comments.length) {
         recentCommentsList.innerHTML = '<div class="empty">No comments yet.</div>';
+        toggleCommentsButton.textContent = "▼";
+        toggleCommentsButton.title = "Show all comments";
+        toggleCommentsButton.setAttribute("aria-label", "Show all comments");
         return;
       }
 
-      recentCommentsList.innerHTML = comments.slice(0, 8).map((comment) => {
+      const visibleComments = showAllComments ? comments : comments.slice(0, 3);
+      toggleCommentsButton.textContent = showAllComments ? "▲" : "▼";
+      toggleCommentsButton.title = showAllComments ? "Hide extra comments" : "Show all comments";
+      toggleCommentsButton.setAttribute("aria-label", toggleCommentsButton.title);
+
+      recentCommentsList.innerHTML = visibleComments.map((comment) => {
         const label = comment.type === "done" ? "Resolved" : comment.type === "request" ? "Request" : "Note";
         return `
           <button class="update-item" type="button" data-comment-sku="${escapeHTML(comment.sku)}">
@@ -1386,6 +1461,11 @@
           </button>
         `;
       }).join("");
+    }
+
+    function toggleComments() {
+      showAllComments = !showAllComments;
+      renderRecentComments();
     }
 
     function showDialog(dialog) {
@@ -1406,12 +1486,26 @@
     function renderTableHead() {
       const visibleChannels = getVisibleChannels();
       tableHead.innerHTML = `
-        <th>SKU</th>
-        <th>Product Name</th>
-        <th>Overall Status</th>
-        ${visibleChannels.map((channel) => `<th>${escapeHTML(channel.name)}</th>`).join("")}
-        <th>Latest Note</th>
+        <th>${sortControl("SKU", "sku")}</th>
+        <th>${sortControl("Product Name", "name")}</th>
+        <th>${sortControl("Overall Status", "overall")}</th>
+        ${visibleChannels.map((channel) => `<th>${sortControl(channel.name, `channel:${channel.id}`)}</th>`).join("")}
+        <th>${sortControl("Latest Note", "note")}</th>
         <th>Actions</th>
+      `;
+    }
+
+    function sortControl(label, key) {
+      const ascActive = sortState.key === key && sortState.direction === "asc";
+      const descActive = sortState.key === key && sortState.direction === "desc";
+      return `
+        <div class="th-content">
+          <span>${escapeHTML(label)}</span>
+          <span class="sort-pair ${sortState.key === key ? "active" : ""}">
+            <button class="sort-mini ${ascActive ? "active" : ""}" type="button" title="Sort ascending" data-quick-sort-key="${escapeHTML(key)}" data-quick-sort-direction="asc">▲</button>
+            <button class="sort-mini ${descActive ? "active" : ""}" type="button" title="Sort descending" data-quick-sort-key="${escapeHTML(key)}" data-quick-sort-direction="desc">▼</button>
+          </span>
+        </div>
       `;
     }
 
@@ -1444,6 +1538,13 @@
         direction: sortDirectionSelect.value
       };
       hideDialog(sortDialog);
+      renderTableHead();
+      renderRows();
+    }
+
+    function quickSort(key, direction) {
+      sortState = { key, direction };
+      renderTableHead();
       renderRows();
     }
 
@@ -1787,6 +1888,11 @@
 
       const deleteChannelButton = event.target.closest("[data-delete-channel-id]");
       if (deleteChannelButton) deleteChannel(deleteChannelButton.dataset.deleteChannelId);
+
+      const quickSortButton = event.target.closest("[data-quick-sort-key]");
+      if (quickSortButton) {
+        quickSort(quickSortButton.dataset.quickSortKey, quickSortButton.dataset.quickSortDirection);
+      }
     });
 
     rowsEl.addEventListener("change", (event) => {
@@ -1814,6 +1920,7 @@
     statusFilter.addEventListener("change", renderRows);
     sortButton.addEventListener("click", openSortDialog);
     applySortButton.addEventListener("click", applySort);
+    toggleCommentsButton.addEventListener("click", toggleComments);
     channelViewButton.addEventListener("click", openChannelViewDialog);
     showAllChannelsButton.addEventListener("click", showAllChannels);
     undoButton.addEventListener("click", undo);
