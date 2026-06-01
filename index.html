@@ -568,6 +568,31 @@
       background: #fbfcfd;
     }
 
+    .check-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 12px;
+      background: #fbfcfd;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .check-row input {
+      width: 18px;
+      height: 18px;
+    }
+
     textarea {
       width: 100%;
       min-height: 96px;
@@ -684,6 +709,7 @@
           <span id="saveStatus" class="save-status">Auto save ready</span>
           <button id="undoButton" class="button icon-action" type="button" title="Undo" aria-label="Undo" disabled>↶</button>
           <button id="redoButton" class="button icon-action" type="button" title="Redo" aria-label="Redo" disabled>↷</button>
+          <button id="channelViewButton" class="button" type="button">Channels</button>
           <button id="addChannelButton" class="button" type="button">Add Website</button>
           <button id="addProductButton" class="button primary" type="button">Add Product</button>
         </div>
@@ -812,6 +838,20 @@
     </div>
   </div>
 
+  <div id="channelViewDialog" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-head">
+      <h2 class="modal-title">Visible Channels</h2>
+      <button class="icon-button" type="button" data-close-dialog="channelViewDialog">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="channelViewList" class="check-list"></div>
+    </div>
+    <div class="modal-foot">
+      <button id="showAllChannelsButton" class="button" type="button">Show All</button>
+      <button class="button primary" type="button" data-close-dialog="channelViewDialog">Done</button>
+    </div>
+  </div>
+
   <div id="noteDialog" class="modal" role="dialog" aria-modal="true" hidden>
     <div class="modal-head">
       <h2 id="modalTitle" class="modal-title">Notes</h2>
@@ -908,12 +948,14 @@
     const saveStatus = document.querySelector("#saveStatus");
     const undoButton = document.querySelector("#undoButton");
     const redoButton = document.querySelector("#redoButton");
+    const channelViewButton = document.querySelector("#channelViewButton");
     const channelList = document.querySelector("#channelList");
     const addProductButton = document.querySelector("#addProductButton");
     const addChannelButton = document.querySelector("#addChannelButton");
     const productDialog = document.querySelector("#productDialog");
     const channelDialog = document.querySelector("#channelDialog");
     const sortDialog = document.querySelector("#sortDialog");
+    const channelViewDialog = document.querySelector("#channelViewDialog");
     const noteDialog = document.querySelector("#noteDialog");
     const productModalTitle = document.querySelector("#productModalTitle");
     const productForm = document.querySelector("#productForm");
@@ -927,6 +969,8 @@
     const sortKeySelect = document.querySelector("#sortKeySelect");
     const sortDirectionSelect = document.querySelector("#sortDirectionSelect");
     const applySortButton = document.querySelector("#applySortButton");
+    const channelViewList = document.querySelector("#channelViewList");
+    const showAllChannelsButton = document.querySelector("#showAllChannelsButton");
     const modalTitle = document.querySelector("#modalTitle");
     const noteText = document.querySelector("#noteText");
     const noteAuthor = document.querySelector("#noteAuthor");
@@ -945,6 +989,7 @@
     let undoStack = [];
     let redoStack = [];
     let isRestoringHistory = false;
+    let visibleChannelIds = [];
 
     function clone(value) {
       return JSON.parse(JSON.stringify(value));
@@ -1006,6 +1051,17 @@
         state: clone(state),
         notes: clone(loadNotes())
       };
+    }
+
+    function getVisibleChannels() {
+      if (!visibleChannelIds.length) {
+        visibleChannelIds = state.channels.map((channel) => channel.id);
+      }
+      visibleChannelIds = visibleChannelIds.filter((id) => state.channels.some((channel) => channel.id === id));
+      if (!visibleChannelIds.length && state.channels.length) {
+        visibleChannelIds = state.channels.map((channel) => channel.id);
+      }
+      return state.channels.filter((channel) => visibleChannelIds.includes(channel.id));
     }
 
     function updateHistoryButtons() {
@@ -1230,11 +1286,12 @@
     }
 
     function renderTableHead() {
+      const visibleChannels = getVisibleChannels();
       tableHead.innerHTML = `
         <th>SKU</th>
         <th>Product Name</th>
         <th>Overall Status</th>
-        ${state.channels.map((channel) => `<th>${escapeHTML(channel.name)}</th>`).join("")}
+        ${visibleChannels.map((channel) => `<th>${escapeHTML(channel.name)}</th>`).join("")}
         <th>Latest Note</th>
         <th>Actions</th>
       `;
@@ -1273,14 +1330,53 @@
     }
 
     function renderChannelList() {
+      const visibleSet = new Set(getVisibleChannels().map((channel) => channel.id));
       channelList.innerHTML = state.channels
         .map((channel) => `
-          <span class="pill">
+          <span class="pill" title="${visibleSet.has(channel.id) ? "Visible" : "Hidden"}">
             ${escapeHTML(channel.name)}
+            ${visibleSet.has(channel.id) ? "" : "(hidden)"}
             <button type="button" title="Remove ${escapeHTML(channel.name)}" data-delete-channel-id="${escapeHTML(channel.id)}">x</button>
           </span>
         `)
         .join("");
+    }
+
+    function renderChannelViewOptions() {
+      const visibleSet = new Set(getVisibleChannels().map((channel) => channel.id));
+      channelViewList.innerHTML = state.channels.map((channel) => `
+        <label class="check-row">
+          <span>${escapeHTML(channel.name)}</span>
+          <input type="checkbox" data-visible-channel-id="${escapeHTML(channel.id)}" ${visibleSet.has(channel.id) ? "checked" : ""} />
+        </label>
+      `).join("");
+    }
+
+    function openChannelViewDialog() {
+      renderChannelViewOptions();
+      showDialog(channelViewDialog);
+    }
+
+    function applyChannelVisibility(channelId, checked) {
+      const next = new Set(getVisibleChannels().map((channel) => channel.id));
+      if (checked) {
+        next.add(channelId);
+      } else {
+        next.delete(channelId);
+      }
+      visibleChannelIds = [...next];
+      renderTableHead();
+      renderChannelList();
+      renderRows();
+      renderChannelViewOptions();
+    }
+
+    function showAllChannels() {
+      visibleChannelIds = state.channels.map((channel) => channel.id);
+      renderTableHead();
+      renderChannelList();
+      renderRows();
+      renderChannelViewOptions();
     }
 
     function matchesFilters(product) {
@@ -1328,6 +1424,7 @@
     function renderRows() {
       const filteredProducts = sortProducts(state.products.filter(matchesFilters));
       rowsEl.innerHTML = filteredProducts.map((product) => {
+        const visibleChannels = getVisibleChannels();
         const latestNote = getLatestNote(product.sku);
         const preview = latestNote
           ? `<strong>${latestNote.type === "done" ? "Resolved" : latestNote.type === "request" ? "Request" : "Note"}</strong>: ${escapeHTML(latestNote.text)}`
@@ -1338,7 +1435,7 @@
             <td><span class="sku">${escapeHTML(product.sku)}</span></td>
             <td class="product">${escapeHTML(product.name)}<span class="sub">${escapeHTML(product.category || "No category")}</span></td>
             <td><span class="status ${overall}">${getOverallStatusLabel(overall)}</span></td>
-            ${state.channels.map((channel) => `<td>${renderChannelCell(product, channel)}</td>`).join("")}
+            ${visibleChannels.map((channel) => `<td>${renderChannelCell(product, channel)}</td>`).join("")}
             <td><div class="note-preview">${preview}</div></td>
             <td>
               <div class="row-actions">
@@ -1582,10 +1679,19 @@
       }
     }, true);
 
+    channelViewList.addEventListener("change", (event) => {
+      const checkbox = event.target.closest("[data-visible-channel-id]");
+      if (checkbox) {
+        applyChannelVisibility(checkbox.dataset.visibleChannelId, checkbox.checked);
+      }
+    });
+
     searchInput.addEventListener("input", renderRows);
     statusFilter.addEventListener("change", renderRows);
     sortButton.addEventListener("click", openSortDialog);
     applySortButton.addEventListener("click", applySort);
+    channelViewButton.addEventListener("click", openChannelViewDialog);
+    showAllChannelsButton.addEventListener("click", showAllChannels);
     undoButton.addEventListener("click", undo);
     redoButton.addEventListener("click", redo);
     document.addEventListener("keydown", (event) => {
