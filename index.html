@@ -159,7 +159,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      grid-template-columns: repeat(6, minmax(130px, 1fr));
       gap: 12px;
       margin-bottom: 18px;
     }
@@ -381,6 +381,11 @@
     }
 
     .status.review_complete {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .status.complete {
       background: var(--green-bg);
       color: var(--green);
     }
@@ -700,11 +705,7 @@
           <strong id="inProgressCount">0</strong>
         </div>
         <div class="stat">
-          <span>Work Complete</span>
-          <strong id="workCompleteCount">0</strong>
-        </div>
-        <div class="stat">
-          <span>Review Complete</span>
+          <span>Complete</span>
           <strong id="reviewCompleteCount">0</strong>
         </div>
         <div class="stat">
@@ -846,6 +847,13 @@
       { id: "in_progress", label: "In Progress" },
       { id: "work_complete", label: "Work Complete" },
       { id: "review_complete", label: "Review Complete" },
+      { id: "rejected", label: "Rejected" }
+    ];
+
+    const overallStatuses = [
+      { id: "not_started", label: "Not Started" },
+      { id: "in_progress", label: "In Progress" },
+      { id: "complete", label: "Complete" },
       { id: "rejected", label: "Rejected" }
     ];
 
@@ -1128,7 +1136,18 @@
       return statuses.find((status) => status.id === statusId)?.label || "Not Started";
     }
 
+    function getOverallStatusLabel(statusId) {
+      return overallStatuses.find((status) => status.id === statusId)?.label || "Not Started";
+    }
+
     function getStatusRank(statusId) {
+      const index = overallStatuses.findIndex((status) => status.id === statusId);
+      if (index !== -1) return index;
+      const channelIndex = statuses.findIndex((status) => status.id === statusId);
+      return channelIndex === -1 ? 0 : channelIndex;
+    }
+
+    function getChannelStatusRank(statusId) {
       const index = statuses.findIndex((status) => status.id === statusId);
       return index === -1 ? 0 : index;
     }
@@ -1152,7 +1171,7 @@
       if (key === "note") return latestNoteValue(product.sku);
       if (key.startsWith("channel:")) {
         const channelId = key.replace("channel:", "");
-        return getStatusRank(product.channels[channelId]?.status || "not_started");
+        return getChannelStatusRank(product.channels[channelId]?.status || "not_started");
       }
       return "";
     }
@@ -1175,9 +1194,9 @@
     function getProductOverallStatus(product) {
       const productStatuses = state.channels.map((channel) => product.channels[channel.id]?.status || "not_started");
       if (productStatuses.includes("rejected")) return "rejected";
-      if (productStatuses.every((status) => status === "review_complete")) return "review_complete";
-      if (productStatuses.some((status) => status === "in_progress")) return "in_progress";
-      if (productStatuses.some((status) => status === "work_complete")) return "work_complete";
+      if (productStatuses.every((status) => status === "review_complete")) return "complete";
+      if (productStatuses.every((status) => status === "not_started")) return "not_started";
+      if (productStatuses.some((status) => status !== "not_started")) return "in_progress";
       return "not_started";
     }
 
@@ -1282,10 +1301,8 @@
         filteredProducts.filter((product) => getProductOverallStatus(product) === "not_started").length;
       document.querySelector("#inProgressCount").textContent =
         filteredProducts.filter((product) => getProductOverallStatus(product) === "in_progress").length;
-      document.querySelector("#workCompleteCount").textContent =
-        filteredProducts.filter((product) => getProductOverallStatus(product) === "work_complete").length;
       document.querySelector("#reviewCompleteCount").textContent =
-        filteredProducts.filter((product) => getProductOverallStatus(product) === "review_complete").length;
+        filteredProducts.filter((product) => getProductOverallStatus(product) === "complete").length;
       document.querySelector("#rejectedCount").textContent =
         filteredProducts.filter((product) => getProductOverallStatus(product) === "rejected").length;
       document.querySelector("#openNotes").textContent = getOpenNoteCount();
@@ -1320,7 +1337,7 @@
           <tr>
             <td><span class="sku">${escapeHTML(product.sku)}</span></td>
             <td class="product">${escapeHTML(product.name)}<span class="sub">${escapeHTML(product.category || "No category")}</span></td>
-            <td><span class="status ${overall}">${getStatusLabel(overall)}</span></td>
+            <td><span class="status ${overall}">${getOverallStatusLabel(overall)}</span></td>
             ${state.channels.map((channel) => `<td>${renderChannelCell(product, channel)}</td>`).join("")}
             <td><div class="note-preview">${preview}</div></td>
             <td>
