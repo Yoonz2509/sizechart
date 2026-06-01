@@ -135,6 +135,23 @@
       opacity: 0.45;
     }
 
+    .icon-action {
+      width: 40px;
+      min-width: 40px;
+      padding: 0;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .save-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
     .content {
       padding-top: 22px;
       padding-bottom: 42px;
@@ -250,6 +267,10 @@
 
     tbody tr:hover {
       background: #fafbfc;
+    }
+
+    tbody tr {
+      position: relative;
     }
 
     .sku {
@@ -399,6 +420,32 @@
       border-color: #fecdca;
       background: var(--red-bg);
       color: var(--red);
+    }
+
+    .row-delete-button {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 5;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid #fecdca;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--red);
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1;
+      box-shadow: 0 10px 22px rgba(31, 41, 55, 0.12);
+    }
+
+    tbody tr:hover .row-delete-button,
+    tbody tr:focus-within .row-delete-button {
+      display: inline-flex;
     }
 
     .empty {
@@ -626,7 +673,12 @@
           <select id="statusFilter" class="select" aria-label="Status filter">
             <option value="all">All Statuses</option>
           </select>
+          <button id="sortButton" class="button" type="button">Sort</button>
           <button id="resetButton" class="button" type="button">Reset</button>
+          <button id="saveButton" class="button" type="button">Save</button>
+          <span id="saveStatus" class="save-status">Auto save ready</span>
+          <button id="undoButton" class="button icon-action" type="button" title="Undo" aria-label="Undo" disabled>↶</button>
+          <button id="redoButton" class="button icon-action" type="button" title="Redo" aria-label="Redo" disabled>↷</button>
           <button id="addChannelButton" class="button" type="button">Add Website</button>
           <button id="addProductButton" class="button primary" type="button">Add Product</button>
         </div>
@@ -733,6 +785,32 @@
     </div>
   </div>
 
+  <div id="sortDialog" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-head">
+      <h2 class="modal-title">Sort</h2>
+      <button class="icon-button" type="button" data-close-dialog="sortDialog">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <label>
+          Sort By
+          <select id="sortKeySelect" class="select"></select>
+        </label>
+        <label>
+          Direction
+          <select id="sortDirectionSelect" class="select">
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="button" type="button" data-close-dialog="sortDialog">Cancel</button>
+      <button id="applySortButton" class="button primary" type="button">Apply Sort</button>
+    </div>
+  </div>
+
   <div id="noteDialog" class="modal" role="dialog" aria-modal="true" hidden>
     <div class="modal-head">
       <h2 id="modalTitle" class="modal-title">Notes</h2>
@@ -816,12 +894,18 @@
     const emptyState = document.querySelector("#emptyState");
     const searchInput = document.querySelector("#searchInput");
     const statusFilter = document.querySelector("#statusFilter");
+    const sortButton = document.querySelector("#sortButton");
     const resetButton = document.querySelector("#resetButton");
+    const saveButton = document.querySelector("#saveButton");
+    const saveStatus = document.querySelector("#saveStatus");
+    const undoButton = document.querySelector("#undoButton");
+    const redoButton = document.querySelector("#redoButton");
     const channelList = document.querySelector("#channelList");
     const addProductButton = document.querySelector("#addProductButton");
     const addChannelButton = document.querySelector("#addChannelButton");
     const productDialog = document.querySelector("#productDialog");
     const channelDialog = document.querySelector("#channelDialog");
+    const sortDialog = document.querySelector("#sortDialog");
     const noteDialog = document.querySelector("#noteDialog");
     const productModalTitle = document.querySelector("#productModalTitle");
     const productForm = document.querySelector("#productForm");
@@ -832,6 +916,9 @@
     const saveProductButton = document.querySelector("#saveProductButton");
     const channelNameInput = document.querySelector("#channelNameInput");
     const saveChannelButton = document.querySelector("#saveChannelButton");
+    const sortKeySelect = document.querySelector("#sortKeySelect");
+    const sortDirectionSelect = document.querySelector("#sortDirectionSelect");
+    const applySortButton = document.querySelector("#applySortButton");
     const modalTitle = document.querySelector("#modalTitle");
     const noteText = document.querySelector("#noteText");
     const noteAuthor = document.querySelector("#noteAuthor");
@@ -843,6 +930,13 @@
     let state = loadData();
     let activeSku = null;
     let editingSku = null;
+    let sortState = { key: "sku", direction: "asc" };
+    let remoteReady = false;
+    let remoteSaveTimer = null;
+    let remoteLoadTimer = null;
+    let undoStack = [];
+    let redoStack = [];
+    let isRestoringHistory = false;
 
     function clone(value) {
       return JSON.parse(JSON.stringify(value));
@@ -857,8 +951,22 @@
       }
     }
 
-    function saveData() {
+    function formatSaveTime() {
+      return new Date().toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    function updateSaveStatus(label) {
+      saveStatus.textContent = `${label} at ${formatSaveTime()}`;
+    }
+
+    function saveData(label = "Auto saved") {
       localStorage.setItem(dataKey, JSON.stringify(state));
+      updateSaveStatus(label);
+      queueRemoteSave();
     }
 
     function normalizeData(data) {
@@ -885,8 +993,121 @@
       }
     }
 
-    function saveNotes(notes) {
+    function getSnapshot() {
+      return {
+        state: clone(state),
+        notes: clone(loadNotes())
+      };
+    }
+
+    function updateHistoryButtons() {
+      undoButton.disabled = undoStack.length === 0;
+      redoButton.disabled = redoStack.length === 0;
+    }
+
+    function pushHistory() {
+      if (isRestoringHistory) return;
+      undoStack.push(getSnapshot());
+      if (undoStack.length > 80) undoStack.shift();
+      redoStack = [];
+      updateHistoryButtons();
+    }
+
+    function restoreSnapshot(snapshot, label) {
+      if (!snapshot) return;
+      isRestoringHistory = true;
+      state = normalizeData(clone(snapshot.state));
+      localStorage.setItem(dataKey, JSON.stringify(state));
+      localStorage.setItem(notesKey, JSON.stringify(clone(snapshot.notes || {})));
+      renderAll();
+      if (activeSku) renderHistory();
+      isRestoringHistory = false;
+      updateHistoryButtons();
+      saveRemoteState(label);
+    }
+
+    function undo() {
+      if (!undoStack.length) return;
+      redoStack.push(getSnapshot());
+      restoreSnapshot(undoStack.pop(), "Undo saved");
+    }
+
+    function redo() {
+      if (!redoStack.length) return;
+      undoStack.push(getSnapshot());
+      restoreSnapshot(redoStack.pop(), "Redo saved");
+    }
+
+    function saveNotes(notes, label = "Auto saved") {
       localStorage.setItem(notesKey, JSON.stringify(notes));
+      updateSaveStatus(label);
+      queueRemoteSave();
+    }
+
+    async function saveNow() {
+      localStorage.setItem(dataKey, JSON.stringify(state));
+      localStorage.setItem(notesKey, JSON.stringify(loadNotes()));
+      await saveRemoteState("Saved");
+    }
+
+    function queueRemoteSave() {
+      if (!remoteReady) return;
+      clearTimeout(remoteSaveTimer);
+      remoteSaveTimer = setTimeout(() => {
+        saveRemoteState("Auto saved");
+      }, 650);
+    }
+
+    async function saveRemoteState(label = "Saved") {
+      try {
+        const response = await fetch("/api/state", {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            state,
+            notes: loadNotes()
+          })
+        });
+
+        if (!response.ok) throw new Error("Remote save failed");
+        remoteReady = true;
+        updateSaveStatus(label);
+      } catch {
+        updateSaveStatus("Saved locally");
+      }
+    }
+
+    async function loadRemoteState() {
+      try {
+        const response = await fetch("/api/state", { cache: "no-store" });
+        if (!response.ok) throw new Error("Remote load failed");
+        const payload = await response.json();
+        remoteReady = true;
+
+        if (payload.state) {
+          state = normalizeData(payload.state);
+          localStorage.setItem(dataKey, JSON.stringify(state));
+        }
+        if (payload.notes) {
+          localStorage.setItem(notesKey, JSON.stringify(payload.notes));
+        }
+
+        renderAll();
+        updateSaveStatus("Synced");
+      } catch {
+        remoteReady = false;
+        updateSaveStatus("Local mode");
+      }
+    }
+
+    function startRemoteSync() {
+      loadRemoteState();
+      clearInterval(remoteLoadTimer);
+      remoteLoadTimer = setInterval(() => {
+        if (!document.hidden) loadRemoteState();
+      }, 15000);
     }
 
     function escapeHTML(value) {
@@ -905,6 +1126,50 @@
 
     function getStatusLabel(statusId) {
       return statuses.find((status) => status.id === statusId)?.label || "Not Started";
+    }
+
+    function getStatusRank(statusId) {
+      const index = statuses.findIndex((status) => status.id === statusId);
+      return index === -1 ? 0 : index;
+    }
+
+    function naturalCompare(left, right) {
+      return String(left || "").localeCompare(String(right || ""), undefined, {
+        numeric: true,
+        sensitivity: "base"
+      });
+    }
+
+    function latestNoteValue(sku) {
+      const latestNote = getLatestNote(sku);
+      return latestNote ? `${latestNote.createdAt} ${latestNote.text}` : "";
+    }
+
+    function getSortValue(product, key) {
+      if (key === "sku") return product.sku;
+      if (key === "name") return product.name;
+      if (key === "overall") return getStatusRank(getProductOverallStatus(product));
+      if (key === "note") return latestNoteValue(product.sku);
+      if (key.startsWith("channel:")) {
+        const channelId = key.replace("channel:", "");
+        return getStatusRank(product.channels[channelId]?.status || "not_started");
+      }
+      return "";
+    }
+
+    function sortProducts(products) {
+      const sorted = [...products];
+      const direction = sortState.direction === "asc" ? 1 : -1;
+      sorted.sort((left, right) => {
+        const leftValue = getSortValue(left, sortState.key);
+        const rightValue = getSortValue(right, sortState.key);
+        let result = typeof leftValue === "number" && typeof rightValue === "number"
+          ? leftValue - rightValue
+          : naturalCompare(leftValue, rightValue);
+        if (result === 0) result = naturalCompare(left.sku, right.sku);
+        return result * direction;
+      });
+      return sorted;
     }
 
     function getProductOverallStatus(product) {
@@ -954,6 +1219,38 @@
         <th>Latest Note</th>
         <th>Actions</th>
       `;
+    }
+
+    function renderSortOptions() {
+      const options = [
+        { key: "sku", label: "SKU" },
+        { key: "name", label: "Product Name" },
+        { key: "overall", label: "Overall Status" },
+        ...state.channels.map((channel) => ({
+          key: `channel:${channel.id}`,
+          label: `${channel.name} Status`
+        })),
+        { key: "note", label: "Latest Note" }
+      ];
+      sortKeySelect.innerHTML = options
+        .map((option) => `<option value="${escapeHTML(option.key)}">${escapeHTML(option.label)}</option>`)
+        .join("");
+      sortKeySelect.value = sortState.key;
+      sortDirectionSelect.value = sortState.direction;
+    }
+
+    function openSortDialog() {
+      renderSortOptions();
+      showDialog(sortDialog);
+    }
+
+    function applySort() {
+      sortState = {
+        key: sortKeySelect.value,
+        direction: sortDirectionSelect.value
+      };
+      hideDialog(sortDialog);
+      renderRows();
     }
 
     function renderChannelList() {
@@ -1012,7 +1309,7 @@
     }
 
     function renderRows() {
-      const filteredProducts = state.products.filter(matchesFilters);
+      const filteredProducts = sortProducts(state.products.filter(matchesFilters));
       rowsEl.innerHTML = filteredProducts.map((product) => {
         const latestNote = getLatestNote(product.sku);
         const preview = latestNote
@@ -1030,8 +1327,8 @@
               <div class="row-actions">
                 <button class="small-button" type="button" data-note-sku="${escapeHTML(product.sku)}">Notes</button>
                 <button class="small-button" type="button" data-edit-sku="${escapeHTML(product.sku)}">Edit</button>
-                <button class="small-button danger" type="button" data-delete-sku="${escapeHTML(product.sku)}">Delete</button>
               </div>
+              <button class="row-delete-button" type="button" title="Delete ${escapeHTML(product.sku)}" data-delete-sku="${escapeHTML(product.sku)}">&times;</button>
             </td>
           </tr>
         `;
@@ -1085,6 +1382,7 @@
         return;
       }
 
+      pushHistory();
       const product = editingSku
         ? state.products.find((item) => item.sku === editingSku)
         : { sku, channels: {} };
@@ -1107,6 +1405,7 @@
     function addChannel() {
       const name = channelNameInput.value.trim();
       if (!name) return;
+      pushHistory();
       let id = slugify(name);
       let suffix = 2;
       while (state.channels.some((channel) => channel.id === id)) {
@@ -1125,6 +1424,7 @@
 
     function deleteProduct(sku) {
       if (!confirm(`Delete ${sku} from this dashboard?`)) return;
+      pushHistory();
       state.products = state.products.filter((product) => product.sku !== sku);
       const notes = loadNotes();
       delete notes[sku];
@@ -1136,6 +1436,7 @@
     function deleteChannel(channelId) {
       const channel = state.channels.find((item) => item.id === channelId);
       if (!channel || !confirm(`Remove ${channel.name} from this dashboard?`)) return;
+      pushHistory();
       state.channels = state.channels.filter((item) => item.id !== channelId);
       state.products.forEach((product) => {
         delete product.channels[channelId];
@@ -1147,6 +1448,8 @@
     function updateInlineStatus(sku, channelId, status) {
       const product = state.products.find((item) => item.sku === sku);
       if (!product) return;
+      if (product.channels[channelId].status === status) return;
+      pushHistory();
       product.channels[channelId].status = status;
       saveData();
       renderRows();
@@ -1155,7 +1458,10 @@
     function updateInlineUrl(sku, channelId, url) {
       const product = state.products.find((item) => item.sku === sku);
       if (!product) return;
-      product.channels[channelId].url = url.trim();
+      const nextUrl = url.trim();
+      if (product.channels[channelId].url === nextUrl) return;
+      pushHistory();
+      product.channels[channelId].url = nextUrl;
       saveData();
       renderRows();
     }
@@ -1193,6 +1499,7 @@
     function addNote() {
       const text = noteText.value.trim();
       if (!text || !activeSku) return;
+      pushHistory();
       const notes = loadNotes();
       notes[activeSku] = [
         {
@@ -1211,6 +1518,7 @@
 
     function clearNotes() {
       if (!activeSku || !confirm("Delete all notes for this SKU?")) return;
+      pushHistory();
       const notes = loadNotes();
       delete notes[activeSku];
       saveNotes(notes);
@@ -1259,11 +1567,27 @@
 
     searchInput.addEventListener("input", renderRows);
     statusFilter.addEventListener("change", renderRows);
+    sortButton.addEventListener("click", openSortDialog);
+    applySortButton.addEventListener("click", applySort);
+    undoButton.addEventListener("click", undo);
+    redoButton.addEventListener("click", redo);
+    document.addEventListener("keydown", (event) => {
+      const key = event.key.toLowerCase();
+      const isUndo = (event.ctrlKey || event.metaKey) && key === "z" && !event.shiftKey;
+      const isRedo = (event.ctrlKey || event.metaKey) && (key === "y" || (key === "z" && event.shiftKey));
+      if (!isUndo && !isRedo) return;
+      const tagName = document.activeElement?.tagName;
+      if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT") return;
+      event.preventDefault();
+      if (isUndo) undo();
+      if (isRedo) redo();
+    });
     resetButton.addEventListener("click", () => {
       searchInput.value = "";
       statusFilter.value = "all";
       renderRows();
     });
+    saveButton.addEventListener("click", saveNow);
     addProductButton.addEventListener("click", () => openProductForm());
     addChannelButton.addEventListener("click", () => showDialog(channelDialog));
     saveProductButton.addEventListener("click", saveProduct);
@@ -1272,6 +1596,9 @@
     clearProductNotes.addEventListener("click", clearNotes);
 
     renderAll();
+    updateHistoryButtons();
+    updateSaveStatus("Loaded");
+    startRemoteSync();
   </script>
 </body>
 </html>
