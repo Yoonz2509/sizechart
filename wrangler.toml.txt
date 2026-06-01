@@ -1,0 +1,12 @@
+name = "sizechart"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+
+[assets]
+directory = "."
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sizechart-db"
+database_id = "5be04c38-5bd2-43f3-b627-3a5df114ddee"
